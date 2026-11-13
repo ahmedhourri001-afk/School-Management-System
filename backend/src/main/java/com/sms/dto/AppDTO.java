@@ -102,6 +102,16 @@ public class AppDTO {
         }
     }
 
+    // Résumé des absences d'un étudiant pour un cours, comparé au seuil configuré
+    @Getter @Setter @Builder @NoArgsConstructor @AllArgsConstructor
+    public static class AbsenceSummary {
+        private Long courseId;
+        private String courseName;
+        private long absences;
+        private int maxAbsences;
+        private boolean exceeded;
+    }
+
     // ---- Marks ----
     @Getter @Setter
     public static class MarksRequest {
