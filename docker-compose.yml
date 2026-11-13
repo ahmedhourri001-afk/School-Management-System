@@ -1,0 +1,46 @@
+# Développement local. Les valeurs sensibles viennent du fichier .env (ignoré par Git).
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: sms_mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?définir MYSQL_ROOT_PASSWORD dans .env}
+      MYSQL_DATABASE: ${MYSQL_DATABASE:-sms_db}
+      MYSQL_USER: ${MYSQL_USER:-sms_user}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:?définir MYSQL_PASSWORD dans .env}
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      timeout: 20s
+      retries: 10
+
+  backend:
+    build: ./backend
+    container_name: sms_backend
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:mysql://mysql:3306/${MYSQL_DATABASE:-sms_db}
+      SPRING_DATASOURCE_USERNAME: ${MYSQL_USER:-sms_user}
+      SPRING_DATASOURCE_PASSWORD: ${MYSQL_PASSWORD:?définir MYSQL_PASSWORD dans .env}
+      JWT_SECRET: ${JWT_SECRET:?définir JWT_SECRET dans .env}
+      SEED_ADMIN_PASSWORD: ${SEED_ADMIN_PASSWORD:?définir SEED_ADMIN_PASSWORD dans .env}
+      SEED_FACULTY_PASSWORD: ${SEED_FACULTY_PASSWORD:?définir SEED_FACULTY_PASSWORD dans .env}
+      SEED_STUDENT_PASSWORD: ${SEED_STUDENT_PASSWORD:?définir SEED_STUDENT_PASSWORD dans .env}
+    ports:
+      - "8080:8080"
+
+  frontend:
+    build: ./frontend
+    container_name: sms_frontend
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  mysql_data:
