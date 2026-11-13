@@ -68,7 +68,7 @@ public class CourseController {
     }
 
     @GetMapping("/faculty/courses")
-    @PreAuthorize("hasAnyRole('FACULTY','ADMIN')")
+    @PreAuthorize("hasRole('ADMIN') or @accessGuard.isSelf(authentication, #facultyId)")
     public ResponseEntity<List<AppDTO.CourseResponse>> getFacultyCourses(
             @RequestParam Long facultyId) {
         return ResponseEntity.ok(
@@ -78,7 +78,18 @@ public class CourseController {
         );
     }
 
+    @GetMapping("/faculty/courses/{courseId}/students")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN')")
+    public ResponseEntity<List<AppDTO.UserResponse>> getCourseStudents(@PathVariable Long courseId) {
+        return ResponseEntity.ok(
+                userRepository.findByCoursesId(courseId).stream()
+                        .map(AppDTO.UserResponse::from)
+                        .collect(Collectors.toList())
+        );
+    }
+
     @GetMapping("/student/courses")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN') or @accessGuard.isSelf(authentication, #studentId)")
     public ResponseEntity<List<AppDTO.CourseResponse>> getStudentCourses(@RequestParam Long studentId) {
         User student = userRepository.findById(studentId).orElseThrow();
         return ResponseEntity.ok(
@@ -106,7 +117,21 @@ public class CourseController {
         return ResponseEntity.ok(AppDTO.AttendanceResponse.from(attendanceRepository.save(attendance)));
     }
 
+    @PutMapping("/attendance/{id}")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN')")
+    public ResponseEntity<?> updateAttendance(@PathVariable Long id,
+                                              @RequestBody AppDTO.AttendanceRequest req) {
+        return attendanceRepository.findById(id)
+                .map(attendance -> {
+                    if (req.getDate() != null) attendance.setDate(req.getDate());
+                    if (req.getStatus() != null) attendance.setStatus(req.getStatus());
+                    return ResponseEntity.ok(AppDTO.AttendanceResponse.from(attendanceRepository.save(attendance)));
+                })
+                .orElse(ResponseEntity.notFound().build());
+    }
+
     @GetMapping("/attendance/student/{studentId}")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN') or @accessGuard.isSelf(authentication, #studentId)")
     public ResponseEntity<List<AppDTO.AttendanceResponse>> getStudentAttendance(@PathVariable Long studentId) {
         List<AppDTO.AttendanceResponse> result = attendanceRepository.findByStudentId(studentId)
                 .stream().map(a -> {
@@ -163,7 +188,52 @@ public class CourseController {
         return ResponseEntity.ok(AppDTO.MarksResponse.from(saved));
     }
 
+    @PutMapping("/marks/{id}")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN')")
+    public ResponseEntity<?> updateMarks(@PathVariable Long id, @RequestBody AppDTO.MarksRequest req) {
+        Marks marks = marksRepository.findById(id).orElse(null);
+        if (marks == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        // On valide d'abord avec des variables locales : rien n'est modifié si les valeurs sont invalides
+        double obtained = req.getMarksObtained() != null ? req.getMarksObtained() : marks.getMarksObtained();
+        double total = req.getTotalMarks() != null ? req.getTotalMarks() : marks.getTotalMarks();
+        if (total <= 0 || obtained < 0 || obtained > total) {
+            return ResponseEntity.badRequest().body(new AppDTO.MessageResponse("Invalid marks"));
+        }
+
+        Marks.ExamType examType = marks.getExamType();
+        if (req.getExamType() != null) {
+            try {
+                examType = Marks.ExamType.valueOf(req.getExamType());
+            } catch (IllegalArgumentException e) {
+                return ResponseEntity.badRequest().body(new AppDTO.MessageResponse("Invalid exam type"));
+            }
+        }
+
+        marks.setExamType(examType);
+        marks.setMarksObtained(obtained);
+        marks.setTotalMarks(total);
+
+        // saveAndFlush : la note (grade) est recalculée par @PreUpdate avant la réponse
+        Marks saved = marksRepository.saveAndFlush(marks);
+
+        AppDTO.Notification notification = AppDTO.Notification.builder()
+                .type("GRADE_UPDATE")
+                .message("Marks updated for " + saved.getCourse().getName())
+                .courseName(saved.getCourse().getName())
+                .grade(saved.getGrade())
+                .build();
+        messagingTemplate.convertAndSendToUser(
+                saved.getStudent().getEmail(), "/queue/notifications", notification
+        );
+
+        return ResponseEntity.ok(AppDTO.MarksResponse.from(saved));
+    }
+
     @GetMapping("/marks/student/{studentId}")
+    @PreAuthorize("hasAnyRole('FACULTY','ADMIN') or @accessGuard.isSelf(authentication, #studentId)")
     public ResponseEntity<List<AppDTO.MarksResponse>> getStudentMarks(@PathVariable Long studentId) {
         return ResponseEntity.ok(
                 marksRepository.findByStudentId(studentId).stream()
