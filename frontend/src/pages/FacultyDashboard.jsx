@@ -39,12 +39,28 @@ function AttendancePanel({ courses }) {
   const [attendance, setAttendance] = useState({}) // { studentId: 'PRESENT'|'ABSENT'|'LATE' }
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
+  const [history, setHistory] = useState([])
+
+  const loadHistory = (courseId) =>
+    attendanceService.getByCourse(courseId).then(r => setHistory(r.data))
+
+  const handleStatusChange = async (record, status) => {
+    setMsg('')
+    try {
+      await attendanceService.update(record.id, { status })
+      setMsg('Attendance updated.')
+      loadHistory(selectedCourse)
+    } catch {
+      setMsg('Error updating attendance.')
+    }
+  }
 
   useEffect(() => {
     if (!selectedCourse) return
+    loadHistory(selectedCourse)
     api.get(`/courses/${selectedCourse}`).then(r => {
       // Load students enrolled in course
-      api.get(`/admin/students`).then(res => {
+      courseService.getStudents(selectedCourse).then(res => {
         // Filter students who are enrolled — we'll mark all for simplicity
         setStudents(res.data)
         const init = {}
@@ -69,6 +85,7 @@ function AttendancePanel({ courses }) {
         )
       )
       setMsg('Attendance saved successfully!')
+      loadHistory(selectedCourse)
     } catch {
       setMsg('Error saving attendance.')
     } finally {
@@ -145,6 +162,37 @@ function AttendancePanel({ courses }) {
           <p className="text-gray-400 text-sm text-center py-8">Select a course to mark attendance.</p>
         )}
       </div>
+
+      {/* Historique : modification des absences déjà saisies */}
+      {selectedCourse && history.length > 0 && (
+        <div className="bg-white rounded-2xl p-6 shadow-sm">
+          <h3 className="font-semibold text-gray-800 mb-4">Attendance History (change a status to correct it)</h3>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
+                <tr>{['Student','Date','Status'].map(h => <th key={h} className="px-4 py-3 text-left">{h}</th>)}</tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {[...history]
+                  .sort((a, b) => String(b.date).localeCompare(String(a.date)))
+                  .slice(0, 100)
+                  .map(rec => (
+                    <tr key={rec.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3 font-medium text-gray-900">{rec.studentName}</td>
+                      <td className="px-4 py-3 text-gray-500">{rec.date}</td>
+                      <td className="px-4 py-3">
+                        <select value={rec.status} onChange={e => handleStatusChange(rec, e.target.value)}
+                          className="border rounded-lg px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-green-400">
+                          {['PRESENT','ABSENT','LATE'].map(s => <option key={s}>{s}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -158,10 +206,26 @@ function MarksPanel({ courses }) {
   const [msg, setMsg] = useState('')
   const [saving, setSaving] = useState(false)
   const [existingMarks, setExistingMarks] = useState([])
+  const [editingId, setEditingId] = useState(null)
+  const [editValue, setEditValue] = useState('')
+
+  const startEdit = (m) => { setEditingId(m.id); setEditValue(String(m.marksObtained)) }
+
+  const saveEdit = async (m) => {
+    setMsg('')
+    try {
+      await marksService.update(m.id, { marksObtained: Number(editValue) })
+      setMsg('Marks updated! Student notified via WebSocket.')
+      setEditingId(null)
+      marksService.getByCourse(selectedCourse).then(r => setExistingMarks(r.data))
+    } catch {
+      setMsg('Error updating marks (the value must be between 0 and the total).')
+    }
+  }
 
   useEffect(() => {
     if (!selectedCourse) return
-    api.get('/admin/students').then(res => {
+    courseService.getStudents(selectedCourse).then(res => {
       setStudents(res.data)
       const init = {}
       res.data.forEach(s => { init[s.id] = '' })
@@ -268,17 +332,33 @@ function MarksPanel({ courses }) {
           <h3 className="font-semibold text-gray-800 mb-4">Marks History</h3>
           <table className="w-full text-sm">
             <thead className="bg-gray-50 text-gray-500 text-xs uppercase">
-              <tr>{['Student','Exam','Marks','Total','Grade','%'].map(h => <th key={h} className="px-4 py-3 text-left">{h}</th>)}</tr>
+              <tr>{['Student','Exam','Marks','Total','Grade','%','Action'].map(h => <th key={h} className="px-4 py-3 text-left">{h}</th>)}</tr>
             </thead>
             <tbody className="divide-y divide-gray-100">
               {existingMarks.map(m => (
                 <tr key={m.id} className="hover:bg-gray-50">
                   <td className="px-4 py-3 font-medium">{m.studentName}</td>
                   <td className="px-4 py-3"><span className="bg-gray-100 text-gray-700 px-2 py-1 rounded text-xs">{m.examType}</span></td>
-                  <td className="px-4 py-3">{m.marksObtained}</td>
+                  <td className="px-4 py-3">
+                    {editingId === m.id ? (
+                      <input type="number" min="0" max={m.totalMarks} value={editValue}
+                        onChange={e => setEditValue(e.target.value)}
+                        className="border rounded-lg px-2 py-1 text-sm w-24 focus:outline-none focus:ring-2 focus:ring-green-400" />
+                    ) : m.marksObtained}
+                  </td>
                   <td className="px-4 py-3">{m.totalMarks}</td>
                   <td className={`px-4 py-3 font-bold ${gradeColor[m.grade] || ''}`}>{m.grade}</td>
                   <td className="px-4 py-3">{m.percentage}%</td>
+                  <td className="px-4 py-3">
+                    {editingId === m.id ? (
+                      <div className="flex gap-2">
+                        <button onClick={() => saveEdit(m)} className="text-green-600 hover:text-green-800 text-xs font-medium">Save</button>
+                        <button onClick={() => setEditingId(null)} className="text-gray-400 hover:text-gray-600 text-xs font-medium">Cancel</button>
+                      </div>
+                    ) : (
+                      <button onClick={() => startEdit(m)} className="text-blue-600 hover:text-blue-800 text-xs font-medium">Edit</button>
+                    )}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import Layout from '../components/common/Layout'
-import { courseService, attendanceService, marksService } from '../services/api'
+import { courseService, attendanceService, marksService, configService } from '../services/api'
 import { BookOpen, ClipboardCheck, BarChart2, LayoutDashboard } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import { useWebSocket } from '../hooks/useWebSocket'
@@ -82,9 +82,14 @@ function StudentHome({ courses, marks, attendance }) {
 
 function AttendanceView({ studentId }) {
   const [attendance, setAttendance] = useState([])
+  const [summary, setSummary] = useState([])
+  const [maxAbsences, setMaxAbsences] = useState(null)
 
   useEffect(() => {
-    if (studentId) attendanceService.getByStudent(studentId).then(r => setAttendance(r.data))
+    if (!studentId) return
+    attendanceService.getByStudent(studentId).then(r => setAttendance(r.data))
+    attendanceService.getSummary(studentId).then(r => setSummary(r.data))
+    configService.getAbsenceThreshold().then(r => setMaxAbsences(r.data.maxAbsences))
   }, [studentId])
 
   // Group by course
@@ -97,12 +102,18 @@ function AttendanceView({ studentId }) {
   return (
     <div>
       <h2 className="text-xl font-bold text-gray-800 mb-6">My Attendance</h2>
+      {maxAbsences !== null && (
+        <p className="text-sm text-gray-600 bg-blue-50 border border-blue-100 rounded-xl px-4 py-3 mb-4">
+          Maximum allowed absences per course: <span className="font-bold">{maxAbsences}</span>
+        </p>
+      )}
       {Object.keys(byCourse).length === 0 && (
         <p className="text-gray-400 text-sm bg-white rounded-2xl p-8 text-center shadow-sm">No attendance records yet.</p>
       )}
       {Object.entries(byCourse).map(([course, records]) => {
         const present = records.filter(r => r.status === 'PRESENT').length
         const pct = Math.round(present / records.length * 100)
+        const info = summary.find(s => s.courseName === course)
         return (
           <div key={course} className="bg-white rounded-2xl p-6 shadow-sm mb-4">
             <div className="flex items-center justify-between mb-4">
@@ -116,6 +127,12 @@ function AttendanceView({ studentId }) {
             <div className="w-full bg-gray-100 rounded-full h-2 mb-4">
               <div className={`h-2 rounded-full ${pct >= 75 ? 'bg-green-500' : 'bg-red-400'}`} style={{ width: `${pct}%` }} />
             </div>
+            {info && (
+              <p className={`text-sm mb-3 px-3 py-2 rounded-lg ${info.exceeded ? 'bg-red-50 text-red-600' : 'bg-gray-50 text-gray-600'}`}>
+                Absences: <span className="font-bold">{info.absences}</span> / {info.maxAbsences} allowed
+                {info.exceeded && ' — ⚠ threshold exceeded'}
+              </p>
+            )}
             <div className="flex flex-wrap gap-2">
               {records.map(r => (
                 <span key={r.id} title={r.date}

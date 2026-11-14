@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import Layout from '../components/common/Layout'
-import { adminService, courseService, authService } from '../services/api'
-import { Users, BookOpen, GraduationCap, Plus, Trash2, UserPlus, LayoutDashboard } from 'lucide-react'
+import { adminService, courseService, authService, exportService } from '../services/api'
+import { Users, BookOpen, GraduationCap, Plus, Trash2, UserPlus, LayoutDashboard, Download } from 'lucide-react'
 import { useAuth } from '../context/AuthContext'
 import api from '../services/api'
 
@@ -193,12 +193,49 @@ function CoursesPanel() {
   )
 }
 
+function ExportPanel() {
+  const [msg, setMsg] = useState('')
+  const [loading, setLoading] = useState('')
+
+  const handleExport = async (kind, filename) => {
+    setLoading(kind); setMsg('')
+    try {
+      await exportService.download(kind, filename)
+      setMsg(`${filename} downloaded.`)
+    } catch {
+      setMsg('Error exporting data.')
+    } finally {
+      setLoading('')
+    }
+  }
+
+  return (
+    <div>
+      <h2 className="text-xl font-bold text-gray-800 mb-6">Export Data</h2>
+      {msg && <p className={`mb-4 text-sm p-3 rounded-lg ${msg.includes('Error') ? 'bg-red-50 text-red-600' : 'bg-green-50 text-green-600'}`}>{msg}</p>}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        {[['attendance', 'absences.csv', 'Attendance records'], ['marks', 'notes.csv', 'Marks & grades']].map(([kind, filename, label]) => (
+          <div key={kind} className="bg-white rounded-2xl p-6 shadow-sm">
+            <h3 className="font-semibold text-gray-900 mb-1">{label}</h3>
+            <p className="text-xs text-gray-500 mb-4">CSV file ({filename}), readable in Excel.</p>
+            <button onClick={() => handleExport(kind, filename)} disabled={loading === kind}
+              className="flex items-center gap-2 bg-blue-600 text-white px-5 py-2.5 rounded-xl text-sm font-medium hover:bg-blue-700 disabled:opacity-50 transition-colors">
+              <Download size={16} /> {loading === kind ? 'Exporting...' : 'Download CSV'}
+            </button>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
 export default function AdminDashboard() {
   const navItems = [
     { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard, component: <DashboardHome /> },
     { id: 'students', label: 'Students', icon: GraduationCap, component: <StudentsPanel /> },
     { id: 'courses', label: 'Courses', icon: BookOpen, component: <CoursesPanel /> },
     { id: 'faculty', label: 'Faculty', icon: Users, component: <FacultyList /> },
+    { id: 'export', label: 'Export', icon: Download, component: <ExportPanel /> },
   ]
   return <Layout navItems={navItems} role="ADMIN" />
 }
